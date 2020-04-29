@@ -3,5 +3,7 @@
 
 #define MAX_THREAD_NUM 100
 #define MAX_TRANSACTION_NUM 10000
+#define MAX_COMMAND_SIZE 100
+#define MAX_KEY_SIZE 10
 
 #endif

@@ -77,7 +77,7 @@ int Engine::getValue(string key, int xid) {
     it = this->table.find(key);
     if (it == table.end()) {
         printf("No such record!\n");
-        return -1;
+        return INT_MIN;
     } else {
         RecordLine *cur = it->second;
         if (cur->records[0].createdXid != -1 && !recordIsLocked(&(cur->records[0]))) {
@@ -88,7 +88,7 @@ int Engine::getValue(string key, int xid) {
     }
 
     printf("No such record!\n");
-    return -1;
+    return INT_MIN;
 }
 
 int Engine::reclaim(string key) {
@@ -108,6 +108,6 @@ int Engine::reclaim(string key) {
             cur->records[1].expiredXid = -1;
         }
     }
-     
+
     return 0;
 }

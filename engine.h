@@ -37,6 +37,12 @@ class Engine {
         int updateRecord(string key, int value, int xid);
         int getValue(string key, int xid);
         int reclaim(string key);
+        Engine() {}
+        ~Engine() {
+            for (std::map<std::string, struct RecordLine*>::iterator it=table.begin(); it!=table.end(); ++it)
+                delete it->second;
+            table.clear();
+        }
 
     std::map<std::string, struct RecordLine*> table;
 };

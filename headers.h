@@ -8,6 +8,8 @@
 #include <cstdlib>
 #include <thread>
 #include <utility>
+#include <chrono>
+#include <limits.h>
 
 #include "utils.h"
 #include "defines.h"
