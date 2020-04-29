@@ -2,5 +2,6 @@
 #define DEFINES_H
 
 #define MAX_THREAD_NUM 100
+#define MAX_TRANSACTION_NUM 10000
 
 #endif
