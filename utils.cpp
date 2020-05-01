@@ -12,7 +12,7 @@ int getFiles(const char *dir, string *fileNames)
     if (handle == -1)
     {
         cout << "Failed to find first file!\n";
-        return;
+        return -1;
     }
 
     int fileNum = 0;

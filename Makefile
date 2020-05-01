@@ -1,5 +1,5 @@
 # 方便起见一般都会先定义编译器链接器
-CC = g++ 
+CC = g++
 LD = g++
 
 # 正则表达式表示目录下所有.c文件，相当于：SRCS = main.c a.c b.c
@@ -10,6 +10,8 @@ OBJS = $(patsubst %cpp, %o, $(SRCS))
 
 # 可执行文件的名字
 TARGET = MVCC-KV.exe
+
+CXXFLAGS += -std=c++11
 
 # .PHONE伪目标，具体含义百度一下一大堆介绍
 .PHONY:all clean
@@ -24,8 +26,8 @@ $(TARGET): $(OBJS)
 
 # 上一句目标文件依赖一大堆.o文件，这句表示所有.o都由相应名字的.c文件自动生成
 %o:%cpp
-	$(CC) -c $^
+	$(CC) $(CXXFLAGS) -c $^
 
 # make clean删除所有.o和目标文件
 clean:
-	del -f $(OBJS) $(TARGET)
+	del -f $(OBJS) $(TARGET) *.csv
