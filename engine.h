@@ -3,6 +3,7 @@
 
 #include <string>
 #include <map>
+#include <mutex>
 
 using namespace std;
 
@@ -16,6 +17,7 @@ struct Record {
 class RecordLine {
     public:
         struct Record records[2]; 
+        std::mutex mtx;
         RecordLine() {
             records[0].createdXid = -1;
             records[0].expiredXid = -1;
@@ -33,7 +35,7 @@ class Engine {
         bool recordIsVisible(struct Record* r, int xid);
         bool recordIsLocked(struct Record* r, int xid);
         int addRecord(string key, int value, int xid);
-        int deleteRecord(string key, int xid);
+        int deleteRecord(string key, int xid, int& base);
         int updateRecord(string key, int value, int xid);
         int getValue(string key, int xid);
         int reclaim(string key, int xid);

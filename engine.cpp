@@ -4,6 +4,7 @@ extern bool x_is_active[MAX_TRANSACTION_NUM + 1];
 extern vector<pair<string, char>> rollBackActions[MAX_TRANSACTION_NUM + 1];
 
 bool Engine::recordIsVisible(struct Record* r, int xid) {
+    if (r->createdXid == -1) return false;
     if (x_is_active[r->createdXid] && r->createdXid != xid) {
         return false;
     } else if (r->expiredXid != -1 && 
@@ -55,7 +56,7 @@ int Engine::addRecord(string key, int value, int xid) {
     return 0;
 }
 
-int Engine::deleteRecord(string key, int xid) {
+int Engine::deleteRecord(string key, int xid, int& base) {
     std::map<string, RecordLine *>::iterator it;
     it = this->table.find(key);
     RecordLine *cur;
@@ -64,18 +65,29 @@ int Engine::deleteRecord(string key, int xid) {
         return -1;
     } else {
         cur = it->second;
+        cur->mtx.lock();
         if (recordIsLocked(&(cur->records[0]), xid) || recordIsLocked(&(cur->records[1]), xid)) {
             // printf("The record currently locked by another transaction!");
+            cur->mtx.unlock();
             return -1;
         } else if (cur->records[0].createdXid != -1 && cur->records[0].expiredXid == -1) {
             if (cur->records[1].expiredXid == xid ) {
                 cur->records[0].createdXid = -1; // set in the same transaction before
-            } else cur->records[0].expiredXid = xid;
+                base = cur->records[0].value;
+            } else {
+                cur->records[0].expiredXid = xid;
+                base = cur->records[0].value;
+            }
         } else if (cur->records[1].createdXid != -1 && cur->records[1].expiredXid == -1) {
             if (cur->records[0].expiredXid == xid ) {
                 cur->records[1].createdXid = -1; // set in the same transaction before
-            } else cur->records[1].expiredXid = xid;
+                base = cur->records[1].value;
+            } else {
+                cur->records[1].expiredXid = xid;
+                base = cur->records[1].value;
+            }
         }
+        cur->mtx.unlock();
     }
 
     // printf("in delete op xid is %d , key is %s\n", xid, key.c_str());
@@ -95,10 +107,12 @@ int Engine::deleteRecord(string key, int xid) {
 }
 
 int Engine::updateRecord(string key, int value, int xid) {
-    if (deleteRecord(key, xid) != 0) {
+    int base = 0;
+    if (deleteRecord(key, xid, base) != 0) {
         return -1;
     } else {
-        addRecord(key, value, xid);
+        base = base + value;
+        addRecord(key, base, xid);
         // Resource collect later?
     }
     
@@ -114,9 +128,9 @@ int Engine::getValue(string key, int xid) {
         return INT_MIN;
     } else {
         cur = it->second;
-        if (cur->records[0].createdXid != -1 && recordIsVisible(&(cur->records[0]), xid)) {
+        if (cur->records[0].createdXid != -1 && cur->records[0].expiredXid == -1 && recordIsVisible(&(cur->records[0]), xid)) {
             return cur->records[0].value;
-        } else if (cur->records[1].createdXid != -1 && recordIsVisible(&(cur->records[1]), xid)) {
+        } else if (cur->records[1].createdXid != -1 && cur->records[1].expiredXid == -1 && recordIsVisible(&(cur->records[1]), xid)) {
             return cur->records[1].value;
         }
     }
@@ -159,6 +173,7 @@ int Engine::doRollback(vector<pair<string, char>>& rbas, int xid) {
             return -1;
         } else {
             RecordLine *cur = it->second;
+            cur->mtx.lock();
             if (recordIsLocked(&(cur->records[0]), xid) == false && recordIsLocked(&(cur->records[1]), xid) == false) {
                 if (ccmd == 'A') {
                     if (cur->records[0].createdXid != -1 && cur->records[0].expiredXid == -1 && cur->records[1].createdXid != -1 && cur->records[1].expiredXid != -1) {
@@ -174,6 +189,7 @@ int Engine::doRollback(vector<pair<string, char>>& rbas, int xid) {
                     }
                 }
             }
+            cur->mtx.unlock();
         }
     }
 

@@ -79,6 +79,16 @@ int doThread(int id) {
                     case 'B':
                         // Begin
                         sscanf(xbuffer[i] + 6, "%d", &cur_xid);
+                        // sprintf(obuffer[ocnt++], "The begin of txn %d is:\n", cur_xid);
+                        // for (std::map<std::string, struct RecordLine*>::iterator it = engine->table.begin(); it != engine->table.end(); ++it) {
+                        //     string cur_k = it->first;
+                        //     // cout<<"cur_k "<<cur_k<<endl;
+                        //     struct RecordLine* currl = it->second;
+                        //     // cout<<currl->records[0].createdXid<<" "<<currl->records[0].expiredXid<<" "<<currl->records[0].value<<endl;
+                        //     // cout<<currl->records[1].createdXid<<" "<<currl->records[1].expiredXid<<" "<<currl->records[1].value<<endl;
+                        //     sprintf(obuffer[ocnt++],  "key = %s record0 %d %d %d record1 %d %d %d\n", cur_k.c_str(), currl->records[0].value, currl->records[0].createdXid, currl->records[0].expiredXid,
+                        //     currl->records[1].value, currl->records[1].createdXid, currl->records[1].expiredXid);
+                        // }
                         // printf("cur_xid, %d\n", cur_xid);
                         x_is_active[cur_xid] = true;
                         sprintf(obuffer[ocnt++], "%d,BEGIN,%lld,", cur_xid, getTime());
@@ -111,7 +121,7 @@ int doThread(int id) {
                         scnt = 0;
                         while (cur_v == INT_MIN) {
                             // printf("Read failed in txn %d, %s!\n", cur_xid, tar);
-                            std::this_thread::sleep_for(std::chrono::microseconds(rand()%100 + 1));
+                            std::this_thread::sleep_for(std::chrono::microseconds(rand()%10 + 1));
                             cur_v = engine->getValue(cur_k, cur_xid);
                             if (++scnt > 5) {
                                 needRedo = true;
@@ -131,26 +141,30 @@ int doThread(int id) {
                         }
                         // printf("%s, ++ %s ++ %c ++ %d\n", tar, tar, cur_op, cur_op_num);
                         cur_k = tar;
-                        cur_v = engine->getValue(cur_k, cur_xid);
+                        // cur_v = engine->getValue(cur_k, cur_xid);
+                        // scnt = 0;
+                        // while (cur_v == INT_MIN) {
+                        //     // printf("Read failed when updating!\n");
+                        //     std::this_thread::sleep_for(std::chrono::microseconds(rand() % 10 + 1));
+                        //     cur_v = engine->getValue(cur_k, cur_xid);
+                        //     if (++scnt > 5) {
+                        //         needRedo = true;
+                        //         break;
+                        //     }
+                        // }
+                        // if (needRedo) break;
+                        // if (cur_op == '+') cur_v += cur_op_num;
+                        // else cur_v -= cur_op_num;
+
+                        if (cur_op == '+') cur_op_num = cur_op_num;
+                        else cur_op_num = -cur_op_num;
+
                         scnt = 0;
-                        while (cur_v == INT_MIN) {
-                            // printf("Read failed when updating!\n");
-                            std::this_thread::sleep_for(std::chrono::microseconds(1));
-                            cur_v = engine->getValue(cur_k, cur_xid);
-                            if (++scnt > 5) {
-                                needRedo = true;
-                                break;
-                            }
-                        }
-                        if (needRedo) break;
-                        if (cur_op == '+') cur_v += cur_op_num;
-                        else cur_v -= cur_op_num;
-                        scnt = 0;
-                        while (engine->updateRecord(cur_k, cur_v, cur_xid) != 0) {
+                        while (engine->updateRecord(cur_k, cur_op_num, cur_xid) != 0) {
                             // printf("Update blocked!\n");
                             // printf("transaction %d blocked\n", cur_xid);
                             // printf("%s %c %d \n", tar, cur_op, cur_op_num);
-                            std::this_thread::sleep_for(std::chrono::microseconds(rand()%100 + 1));
+                            std::this_thread::sleep_for(std::chrono::microseconds(rand() % 10 + 1));
                             if (++scnt > 5) {
                                 needRedo = true;
                                 break;
@@ -187,6 +201,7 @@ int doThread(int id) {
                 x_is_active[cur_xid] = true;
                 continue;
             } else {
+                // fprintf(wfp, "The end of txn %d is:\n", cur_xid);
                 // for (std::map<std::string, struct RecordLine*>::iterator it = engine->table.begin(); it != engine->table.end(); ++it) {
                 //     string cur_k = it->first;
                 //     // cout<<"cur_k "<<cur_k<<endl;
@@ -195,6 +210,11 @@ int doThread(int id) {
                 //     // cout<<currl->records[1].createdXid<<" "<<currl->records[1].expiredXid<<" "<<currl->records[1].value<<endl;
                 //     fprintf(wfp,  "key = %s record0 %d %d %d record1 %d %d %d\n", cur_k.c_str(), currl->records[0].value, currl->records[0].createdXid, currl->records[0].expiredXid,
                 //     currl->records[1].value, currl->records[1].createdXid, currl->records[1].expiredXid);
+                //     if (engine->recordIsVisible(&(currl->records[0]), cur_xid)) {
+                //         fprintf(wfp, "%s,%d\n", cur_k.c_str(), currl->records[0].value);
+                //     } else if (engine->recordIsVisible(&(currl->records[1]), cur_xid)) {
+                //         fprintf(wfp, "%s,%d\n", cur_k.c_str(), currl->records[1].value);
+                //     } else continue;
                 // }
                 fflush(wfp);
                 rollBackActions[cur_xid].clear();
@@ -274,6 +294,8 @@ int main() {
     for (int i = 0; i < threadNum; ++i) {
         ths[i].join();
     }
+
+    printf("Total time cost is %llf\n", (double)getTime()/1000000000);
 
     // Output the final KV state
     fp = fopen("final_state.csv", "w");
