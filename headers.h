@@ -11,9 +11,13 @@
 #include <chrono>
 #include <limits.h>
 #include <vector>
+#include <fstream>
+#include <ctime>
 
 #include "utils.h"
 #include "defines.h"
 #include "engine.h"
+
+using namespace std;
 
 #endif

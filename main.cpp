@@ -7,13 +7,19 @@ string threadFiles[MAX_THREAD_NUM];
 int threadIDs[MAX_THREAD_NUM];
 thread ths[MAX_THREAD_NUM];
 bool x_is_active[MAX_TRANSACTION_NUM + 1];
+vector<pair<string, char>> rollBackActions[MAX_TRANSACTION_NUM + 1];
 
 Engine *engine;
 
 time_point<high_resolution_clock> start;
 
+string attr_A = "attr_A";
+string attr_B = "attr_B";
+string attr_C = "attr_C";
+string attr_D = "attr_D";
+
 int doThread(int id);
-double getTime();
+long long getTime();
 
 int doThread(int id) {
     int cur_v = 0;
@@ -24,12 +30,13 @@ int doThread(int id) {
     int cur_op_num;
     string cur_k;
 
-    FILE *fp;
-    fp = fopen(threadFiles[id].c_str(), "rb");
-    if (fp == NULL) {
-        printf("Open input file for thread %d failed!\n", id);
-        return -1;
-    }
+    // FILE *fp;
+    ifstream fin(threadFiles[id].c_str());
+    // fp = fopen(threadFiles[id].c_str(), "rb");
+    // if (fp == NULL) {
+    //     printf("Open input file for thread %d failed!\n", id);
+    //     return -1;
+    // }
 
     FILE *wfp;
     char ofNameBuffer[100];
@@ -45,84 +52,181 @@ int doThread(int id) {
     time_t cur_t;
     vector<string> toReclaim;
 
-    while (fscanf(fp, "%s", cmd_buffer) != EOF) {
-        // printf("shit thread %d\n", id);
-        switch (cmd_buffer[0]) {
-            case 'B':
-                // Begin
-                fscanf(fp, "%d", &cur_xid);
-                x_is_active[cur_xid] = true;
-                fprintf(wfp, "%d,BEGIN,%llf,\n", cur_xid, getTime());
-                printf("Thread %d Begin transaction %d\n", id, cur_xid);
-                break;
-            case 'C':
-                // Commit
-                fscanf(fp, "%d", &cur_xid);
-                x_is_active[cur_xid] = false;
-                fprintf(wfp, "%d,END,%llf,\n", cur_xid, getTime());
-                printf("Thread %d End transaction %d\n", id, cur_xid);
-                // Reclaim the resources
-                for (auto x:toReclaim) {
-                    engine->reclaim(x);
-                } 
-                break;
-            case 'R':
-                // Read
-                fscanf(fp, "%s", tar);
-                cur_k = tar;
-                cur_v = engine->getValue(cur_k, cur_xid);
-                while (cur_v == INT_MIN) {
-                    printf("Read failed!\n");
-                    cur_v = engine->getValue(cur_k, cur_xid);
-                }
-                fprintf(wfp, "%d,%s,%llf,%d\n", cur_xid, tar, getTime(), cur_v);
-                printf("Thread %d Read %s %d\n", id, tar, cur_v);
-                break;
-            case 'S':
-                // Set
-                fscanf(fp, "%s", tar);
-                fscanf(fp, "%s %c %d", tar, &cur_op, &cur_op_num);
-                // printf("%s, ++ %s ++ %c ++ %d\n", tar, tar, cur_op, cur_op_num);
-                cur_k = tar;
-                cur_v = engine->getValue(cur_k, cur_xid);
-                while (cur_v == INT_MIN) {
-                    printf("Read failed when updating!\n");
-                    cur_v = engine->getValue(cur_k, cur_xid);
-                }
-                if (cur_op == '+') cur_v += cur_op_num;
-                else cur_v -= cur_op_num;
-                while (engine->updateRecord(cur_k, cur_v, cur_xid) != 0) {
-                    printf("Update blocked!\n");
-                    std::this_thread::sleep_for (std::chrono::microseconds(1));
-                }
-                printf("Thread %d Set %s %d\n", id, tar, cur_v);
-                toReclaim.push_back(cur_k);
-                break;
-            default:
-                printf("Unrecognized command!\n");
-                exit(-1);
-        }
+    char xbuffer[MAX_TRANSACTION_SIZE][MAX_COMMAND_SIZE]; // for roll back
+    char obuffer[MAX_TRANSACTION_SIZE][MAX_COMMAND_SIZE];
+    int ocnt = 0;
+    int xcnt = 0;
+    int scnt = 0;
 
+    while (fin.getline(cmd_buffer, MAX_COMMAND_SIZE)) {
+        if (cmd_buffer[0] != 'C') {
+            strcpy(xbuffer[xcnt], cmd_buffer);
+            xcnt++;
+            continue;
+        }
+        strcpy(xbuffer[xcnt], cmd_buffer);
+        xcnt++;
+        // printf("shit thread %d\n", id);
+        while (true) {
+            // printf("shit\n");
+            // printf("%d\n", cur_xid);
+            bool committed = false;
+            bool needRedo = false;
+            for (int i=0; i<xcnt; ++i) {
+                // printf("%c\n", xbuffer[i][0]);
+                // printf("%d\n", i);
+                switch (xbuffer[i][0]) {
+                    case 'B':
+                        // Begin
+                        sscanf(xbuffer[i] + 6, "%d", &cur_xid);
+                        // printf("cur_xid, %d\n", cur_xid);
+                        x_is_active[cur_xid] = true;
+                        sprintf(obuffer[ocnt++], "%d,BEGIN,%lld,", cur_xid, getTime());
+                        // printf("Thread %d Begin transaction %d\n", id, cur_xid);
+                        break;
+                    case 'C':
+                        // Commit
+                        sscanf(xbuffer[i] + 7, "%d", &cur_xid);
+                        sprintf(obuffer[ocnt++], "%d,END,%lld,", cur_xid, getTime());
+                        // printf("Thread %d End transaction %d\n", id, cur_xid);
+                        // flash the obuffer
+                        for (int k=0; k<ocnt; ++k) {
+                            fprintf(wfp, "%s\n", obuffer[k]);
+                            fflush(wfp);
+                        }
+                        ocnt = 0;
+                        // Reclaim the resources
+                        for (auto x:toReclaim) {
+                            engine->reclaim(x, cur_xid);
+                        }
+                        toReclaim.clear();
+                        x_is_active[cur_xid] = false;
+                        committed = true;
+                        break;
+                    case 'R':
+                        // Read
+                        sscanf(xbuffer[i] + 5, "%s", tar);
+                        cur_k = tar;
+                        cur_v = engine->getValue(cur_k, cur_xid);
+                        scnt = 0;
+                        while (cur_v == INT_MIN) {
+                            // printf("Read failed in txn %d, %s!\n", cur_xid, tar);
+                            std::this_thread::sleep_for(std::chrono::microseconds(rand()%100 + 1));
+                            cur_v = engine->getValue(cur_k, cur_xid);
+                            if (++scnt > 5) {
+                                needRedo = true;
+                                break;
+                            } 
+                        }
+                        sprintf(obuffer[ocnt++], "%d,%s,%lld,%d", cur_xid, tar, getTime(), cur_v);
+                        // printf("Thread %d Read %s %d\n", id, tar, cur_v);
+                        break;
+                    case 'S':
+                        // Set
+                        for (int k=0; k<100; k++) {
+                            if (xbuffer[i][k] == ',') {
+                                sscanf(xbuffer[i] + k + 2, "%s %c %d", tar, &cur_op, &cur_op_num);
+                                break;
+                            }
+                        }
+                        // printf("%s, ++ %s ++ %c ++ %d\n", tar, tar, cur_op, cur_op_num);
+                        cur_k = tar;
+                        cur_v = engine->getValue(cur_k, cur_xid);
+                        scnt = 0;
+                        while (cur_v == INT_MIN) {
+                            // printf("Read failed when updating!\n");
+                            std::this_thread::sleep_for(std::chrono::microseconds(1));
+                            cur_v = engine->getValue(cur_k, cur_xid);
+                            if (++scnt > 5) {
+                                needRedo = true;
+                                break;
+                            }
+                        }
+                        if (needRedo) break;
+                        if (cur_op == '+') cur_v += cur_op_num;
+                        else cur_v -= cur_op_num;
+                        scnt = 0;
+                        while (engine->updateRecord(cur_k, cur_v, cur_xid) != 0) {
+                            // printf("Update blocked!\n");
+                            // printf("transaction %d blocked\n", cur_xid);
+                            // printf("%s %c %d \n", tar, cur_op, cur_op_num);
+                            std::this_thread::sleep_for(std::chrono::microseconds(rand()%100 + 1));
+                            if (++scnt > 5) {
+                                needRedo = true;
+                                break;
+                            } 
+                        }
+                        // printf("Thread %d Set %s %d\n", id, tar, cur_v);
+                        if (!needRedo) toReclaim.push_back(cur_k);
+                        // sprintf(obuffer[ocnt++], "SET %d,%s,%lld,%d", cur_xid, tar, getTime(), cur_v);
+                        break;
+                    default:
+                        printf("Unrecognized command!\n");
+                        exit(-1);
+                }
+                if (needRedo) {
+                    // printf("halo\n");
+                    break;
+                }
+                if (committed) {
+                    break;
+                }
+            }
+            if (needRedo) { 
+                // printf("redo %d\n", cur_xid);              
+                // rollback
+                // fprintf(wfp, "redo txn %d\n", cur_xid);
+                // fflush(wfp);
+                engine->doRollback(rollBackActions[cur_xid], cur_xid);
+                // redo
+                rollBackActions[cur_xid].clear();
+                ocnt = 0;
+                toReclaim.clear();
+                x_is_active[cur_xid] = false;
+                std::this_thread::sleep_for (std::chrono::microseconds(rand()%1000 + 1));
+                x_is_active[cur_xid] = true;
+                continue;
+            } else {
+                // for (std::map<std::string, struct RecordLine*>::iterator it = engine->table.begin(); it != engine->table.end(); ++it) {
+                //     string cur_k = it->first;
+                //     // cout<<"cur_k "<<cur_k<<endl;
+                //     struct RecordLine* currl = it->second;
+                //     // cout<<currl->records[0].createdXid<<" "<<currl->records[0].expiredXid<<" "<<currl->records[0].value<<endl;
+                //     // cout<<currl->records[1].createdXid<<" "<<currl->records[1].expiredXid<<" "<<currl->records[1].value<<endl;
+                //     fprintf(wfp,  "key = %s record0 %d %d %d record1 %d %d %d\n", cur_k.c_str(), currl->records[0].value, currl->records[0].createdXid, currl->records[0].expiredXid,
+                //     currl->records[1].value, currl->records[1].createdXid, currl->records[1].expiredXid);
+                // }
+                fflush(wfp);
+                rollBackActions[cur_xid].clear();
+                xcnt = 0;
+                ocnt = 0;
+                toReclaim.clear();
+                break;
+            }
+        }
     }
     
-    fclose(fp);
+    fin.close();
+    // fclose(fp);
     fclose(wfp);
     return 0;
 }
 
 // Actually this is a duration since start point
-double getTime() {
+long long getTime() {
     time_point<high_resolution_clock> end;
     double duration;
     end = high_resolution_clock::now();//获取当前时间
 	auto dur = duration_cast<nanoseconds>(end - start);
 	duration = double(dur.count()) * nanoseconds::period::num / nanoseconds::period::den * 1000000000;
-    return duration;
+    return (long long)duration;
 }
 
 int main() {
     // Initialize the KV engine
     engine = new Engine();
+
+    srand(1);
 
     char threadFilesPath[] = ".//thread_*.txt";
     int threadNum = getFiles(threadFilesPath, threadFiles);

@@ -31,12 +31,13 @@ class Engine {
 
     public:
         bool recordIsVisible(struct Record* r, int xid);
-        bool recordIsLocked(struct Record* r);
+        bool recordIsLocked(struct Record* r, int xid);
         int addRecord(string key, int value, int xid);
         int deleteRecord(string key, int xid);
         int updateRecord(string key, int value, int xid);
         int getValue(string key, int xid);
-        int reclaim(string key);
+        int reclaim(string key, int xid);
+        int doRollback(vector<pair<string, char>>& rbas, int xid);
         Engine() {}
         ~Engine() {
             for (std::map<std::string, struct RecordLine*>::iterator it=table.begin(); it!=table.end(); ++it)
