@@ -32,14 +32,19 @@ class RecordLine {
 class Engine {
 
     public:
+        std::mutex mtx;
+        std::mutex x_mtx;
+
         bool recordIsVisible(struct Record* r, int xid);
         bool recordIsLocked(struct Record* r, int xid);
         int addRecord(string key, int value, int xid);
         int deleteRecord(string key, int xid, int& base);
         int updateRecord(string key, int value, int xid);
-        int getValue(string key, int xid);
+        int getValue(string key, int xid, long long& ct);
         int reclaim(string key, int xid);
         int doRollback(vector<pair<string, char>>& rbas, int xid);
+        void copyData(std::map<std::string, int>& cur_table, int xid);
+        // void nsUpdate(std::map<std::string, int>& cur_table);
         Engine() {}
         ~Engine() {
             for (std::map<std::string, struct RecordLine*>::iterator it=table.begin(); it!=table.end(); ++it)

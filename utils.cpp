@@ -1,31 +1,35 @@
-#include "headers.h"
+#include <sys/types.h>
+#include <dirent.h>
+#include <errno.h>
+#include <vector>
+#include <string>
+#include <iostream>
 
 using namespace std; 
 
 // getFiles(".//input//thread_*.txt");
 int getFiles(const char *dir, string *fileNames)
 {
-    intptr_t handle;
-    _finddata_t findData;
-
-    handle = _findfirst(dir, &findData);
-    if (handle == -1)
-    {
-        cout << "Failed to find first file!\n";
-        return -1;
-    }
-
     int fileNum = 0;
 
-    do
-    {
-        fileNames[fileNum] = findData.name;
-        cout << fileNames[fileNum] << endl;
-        ++ fileNum;
-    } while (_findnext(handle, &findData) == 0);
+    DIR *dp;
+    struct dirent *dirp;
 
-    cout << "get Files Done!\n";
-    _findclose(handle);
+    if((dp = opendir(dir)) == NULL)
+    {
+      cout << "Error(" << errno << ") opening " << dir << endl;
+      return errno;
+    }
+    while ((dirp = readdir(dp)) != NULL) {
+        string curf = string(dirp->d_name);
+        // printf("%s\n", curf.c_str());
+        if (curf.find("thread_") != std::string::npos) {
+            fileNames[fileNum] = curf;
+            fileNum++;
+        }
+    }
+      
+    closedir(dp);
     
     return fileNum; 
 }

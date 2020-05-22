@@ -13,10 +13,14 @@ Engine *engine;
 
 time_point<high_resolution_clock> start;
 
+std::mutex gt_mtx;
+
 string attr_A = "attr_A";
 string attr_B = "attr_B";
 string attr_C = "attr_C";
 string attr_D = "attr_D";
+
+long long fakeTimer = 0;
 
 int doThread(int id);
 long long getTime();
@@ -29,6 +33,7 @@ int doThread(int id) {
     char cur_op;
     int cur_op_num;
     string cur_k;
+    std::map<std::string, int> cur_table;
 
     // FILE *fp;
     ifstream fin(threadFiles[id].c_str());
@@ -57,6 +62,7 @@ int doThread(int id) {
     int ocnt = 0;
     int xcnt = 0;
     int scnt = 0;
+    long long curTime = 0;
 
     while (fin.getline(cmd_buffer, MAX_COMMAND_SIZE)) {
         if (cmd_buffer[0] != 'C') {
@@ -90,6 +96,8 @@ int doThread(int id) {
                         //     currl->records[1].value, currl->records[1].createdXid, currl->records[1].expiredXid);
                         // }
                         // printf("cur_xid, %d\n", cur_xid);
+                        engine->x_mtx.lock();
+                        engine->copyData(cur_table, cur_xid);
                         x_is_active[cur_xid] = true;
                         sprintf(obuffer[ocnt++], "%d,BEGIN,%lld,", cur_xid, getTime());
                         // printf("Thread %d Begin transaction %d\n", id, cur_xid);
@@ -97,41 +105,46 @@ int doThread(int id) {
                     case 'C':
                         // Commit
                         sscanf(xbuffer[i] + 7, "%d", &cur_xid);
-                        sprintf(obuffer[ocnt++], "%d,END,%lld,", cur_xid, getTime());
                         // printf("Thread %d End transaction %d\n", id, cur_xid);
                         // flash the obuffer
+                        // Reclaim the resources
+                        engine->mtx.lock();
+                        for (auto x:toReclaim) {
+                            engine->reclaim(x, cur_xid);
+                        }
+                        toReclaim.clear();
+                        cur_table.clear();
+                        x_is_active[cur_xid] = false;
+                        sprintf(obuffer[ocnt++], "%d,END,%lld,", cur_xid, getTime());
+                        engine->mtx.unlock();
+
                         for (int k=0; k<ocnt; ++k) {
                             fprintf(wfp, "%s\n", obuffer[k]);
                             fflush(wfp);
                         }
                         ocnt = 0;
-                        // Reclaim the resources
-                        for (auto x:toReclaim) {
-                            engine->reclaim(x, cur_xid);
-                        }
-                        toReclaim.clear();
-                        x_is_active[cur_xid] = false;
                         committed = true;
                         break;
                     case 'R':
                         // Read
                         sscanf(xbuffer[i] + 5, "%s", tar);
                         cur_k = tar;
-                        cur_v = engine->getValue(cur_k, cur_xid);
-                        scnt = 0;
-                        while (cur_v == INT_MIN) {
-                            // printf("Read failed in txn %d, %s!\n", cur_xid, tar);
-                            std::this_thread::sleep_for(std::chrono::microseconds(rand()%10 + 1));
-                            cur_v = engine->getValue(cur_k, cur_xid);
-                            if (++scnt > 5) {
-                                needRedo = true;
-                                break;
-                            } 
-                        }
-                        sprintf(obuffer[ocnt++], "%d,%s,%lld,%d", cur_xid, tar, getTime(), cur_v);
+                        // cur_v = engine->getValue(cur_k, cur_xid, curTime);
+                        // scnt = 0;
+                        // while (cur_v == INT_MIN) {
+                        //     // printf("Read failed in txn %d, %s!\n", cur_xid, tar);
+                        //     std::this_thread::sleep_for(std::chrono::microseconds(rand()%10 + 1));
+                        //     cur_v = engine->getValue(cur_k, cur_xid, curTime);
+                        //     if (++scnt > 5) {
+                        //         needRedo = true;
+                        //         break;
+                        //     } 
+                        // }
+                        sprintf(obuffer[ocnt++], "%d,%s,%lld,%d", cur_xid, tar, getTime(), cur_table[cur_k]);
                         // printf("Thread %d Read %s %d\n", id, tar, cur_v);
                         break;
                     case 'S':
+                        cur_op_num = 0;
                         // Set
                         for (int k=0; k<100; k++) {
                             if (xbuffer[i][k] == ',') {
@@ -157,8 +170,12 @@ int doThread(int id) {
                         // else cur_v -= cur_op_num;
 
                         if (cur_op == '+') cur_op_num = cur_op_num;
-                        else cur_op_num = -cur_op_num;
-
+                        else if (cur_op == '-') cur_op_num = -cur_op_num;
+                        else {
+                            printf("Operator error!\n");
+                            exit(-1);
+                        }
+                        cur_table[cur_k] += cur_op_num;
                         scnt = 0;
                         while (engine->updateRecord(cur_k, cur_op_num, cur_xid) != 0) {
                             // printf("Update blocked!\n");
@@ -199,6 +216,8 @@ int doThread(int id) {
                 x_is_active[cur_xid] = false;
                 std::this_thread::sleep_for (std::chrono::microseconds(rand()%1000 + 1));
                 x_is_active[cur_xid] = true;
+                cur_table.clear();
+                engine->x_mtx.unlock();
                 continue;
             } else {
                 // fprintf(wfp, "The end of txn %d is:\n", cur_xid);
@@ -221,6 +240,7 @@ int doThread(int id) {
                 xcnt = 0;
                 ocnt = 0;
                 toReclaim.clear();
+                engine->x_mtx.unlock();
                 break;
             }
         }
@@ -234,11 +254,13 @@ int doThread(int id) {
 
 // Actually this is a duration since start point
 long long getTime() {
+    gt_mtx.lock();
     time_point<high_resolution_clock> end;
     double duration;
     end = high_resolution_clock::now();//获取当前时间
 	auto dur = duration_cast<nanoseconds>(end - start);
 	duration = double(dur.count()) * nanoseconds::period::num / nanoseconds::period::den * 1000000000;
+    gt_mtx.unlock();
     return (long long)duration;
 }
 
@@ -248,7 +270,7 @@ int main() {
 
     srand(1);
 
-    char threadFilesPath[] = ".//thread_*.txt";
+    char threadFilesPath[] = "./";
     int threadNum = getFiles(threadFilesPath, threadFiles);
 
     for (int i = 0; i < threadNum; ++i) {
@@ -295,7 +317,7 @@ int main() {
         ths[i].join();
     }
 
-    printf("Total time cost is %llf\n", (double)getTime()/1000000000);
+    printf("Total time cost is %lf\n", (double)getTime()/1000000000);
 
     // Output the final KV state
     fp = fopen("final_state.csv", "w");
