@@ -23,7 +23,7 @@ int getFiles(const char *dir, string *fileNames)
     while ((dirp = readdir(dp)) != NULL) {
         string curf = string(dirp->d_name);
         // printf("%s\n", curf.c_str());
-        if (curf.find("thread_") != std::string::npos) {
+        if (curf.find("thread_1") != std::string::npos) {
             fileNames[fileNum] = curf;
             fileNum++;
         }
